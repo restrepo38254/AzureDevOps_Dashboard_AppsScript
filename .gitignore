@@ -1,1 +1,4 @@
-
+node_modules
+.DS_Store
+# ignore google apps script artifacts
+*.gs
