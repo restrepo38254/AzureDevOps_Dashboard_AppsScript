@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <title>Azure DevOps Pipeline Dashboard</title>
+  
+  <!-- CSS y Librerías -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+  
+  <!-- Chart.js y plugins -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.1.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+
+  <style>
+    /* ESTILOS PRINCIPALES */
+    :root {
+      --primary: #0078d4;
+      --success: #107c10;
+      --danger: #d83b01;
+      --warning: #ffaa44;
+      --info: #00b7c3;
+    }
+    
+    body {
+      font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+      background-color: #f8f9fa;
+      color: #333;
+      padding-bottom: 50px;
+    }
+    
+    .dashboard-container {
+      max-width: 1800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    /* TARJETAS */
+    .card {
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+      border: none;
+      margin-bottom: 24px;
+      background: white;
+    }
+    
+    .card-header {
+      background-color: white;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+      font-weight: 600;
+      padding: 16px 20px;
+      border-radius: 8px 8px 0 0 !important;
+    }
+    
+    /* CONTENEDORES DE GRÁFICOS */
+    .chart-container {
+      position: relative;
+      height: 400px;
+      padding: 16px;
+    }
+    
+    /* TARJETAS DE MÉTRICAS */
+    .metric-card {
+      text-align: center;
+      padding: 20px 15px;
+      border-radius: 8px;
+      transition: transform 0.2s;
+      background: #f8f9fa;
+    }
+    
+    .metric-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .metric-value {
+      font-size: 28px;
+      font-weight: 600;
+      margin: 10px 0;
+    }
+    
+    .metric-title {
+      font-size: 14px;
+      color: #6c757d;
+      font-weight: 500;
+    }
+    
+    /* FILTROS */
+    .filter-section {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+    }
+    
+    /* BADGES PARA STAGES */
+    .badge-stage {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 8px;
+      border-radius: 4px;
+      margin-right: 6px;
+      margin-bottom: 6px;
+      display: inline-block;
+    }
+    
+    /* DETALLES DE ERROR */
+    .error-details {
+      background-color: #fff8f8;
+      border-left: 3px solid var(--danger);
+      padding: 12px;
+      margin-top: 8px;
+      border-radius: 0 4px 4px 0;
+    }
+    
+    /* TABLAS */
+    .table-hover tbody tr:hover {
+      background-color: rgba(0, 120, 212, 0.05);
+    }
+    
+    /* LOADING OVERLAY */
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(255, 255, 255, 0.95);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    
+    .progress-container {
+      width: 80%;
+      max-width: 500px;
+      background: #f1f1f1;
+      border-radius: 20px;
+      height: 20px;
+      margin-top: 20px;
+    }
+    
+    .progress-bar {
+      height: 100%;
+      border-radius: 20px;
+      background: linear-gradient(90deg, #0078d4, #00b294);
+      transition: width 0.3s ease;
+    }
+    
+    .loading-message {
+      margin-top: 15px;
+      font-size: 16px;
+      color: #333;
+      text-align: center;
+    }
+    
+    .loading-details {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #666;
+      text-align: center;
+    }
+    
+    .spinner-large {
+      width: 4rem;
+      height: 4rem;
+      border-width: 0.35em;
+    }
+    
+    /* PESTAÑAS */
+    .nav-tabs .nav-link.active {
+      font-weight: 600;
+      border-bottom: 3px solid var(--primary);
+    }
+    
+    /* TIEMPOS DE EJECUCIÓN */
+    .execution-time-card {
+      border-left: 4px solid var(--info);
+    }
+    
+    /* RESPONSIVE */
+    @media (max-width: 768px) {
+      .chart-container {
+        height: 300px;
+      }
+      
+      .metric-value {
+        font-size: 22px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- OVERLAY DE CARGA -->
+  <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+    <div class="spinner-border spinner-large text-primary" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+    <h4 id="loadingTitle" class="loading-message">Loading Pipeline Data</h4>
+    <div id="loadingDetails" class="loading-details">Initializing dashboard...</div>
+    <div class="progress-container">
+      <div id="loadingProgress" class="progress-bar" style="width: 0%"></div>
+    </div>
+  </div>
+
+  <!-- CONTENEDOR PRINCIPAL -->
+  <div class="dashboard-container">
+    <!-- ENCABEZADO -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1 class="h3 mb-0">
+        <i class="bi bi-graph-up"></i> Azure DevOps Pipeline Dashboard
+      </h1>
+      <div class="d-flex align-items-center">
+        <button id="exportBtn" class="btn btn-outline-primary me-2">
+          <i class="bi bi-download"></i> Export
+        </button>
+        <button id="refreshBtn" class="btn btn-primary">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+      </div>
+    </div>
+    
+    <!-- SECCIÓN DE FILTROS -->
+    <div class="filter-section">
+      <div class="row g-3">
+        <div class="col-md-3">
+          <label class="form-label">Time Period</label>
+          <select id="days" class="form-select">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="60">Last 60 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Pipeline Filter</label>
+          <select id="pipelineFilter" class="form-select">
+            <option value="">All Pipelines</option>
+            <!-- Las opciones se llenarán dinámicamente -->
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Stage Filter</label>
+          <input type="text" id="stageFilter" class="form-control" placeholder="Filter by stage name">
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <button id="applyFilters" class="btn btn-primary w-100">
+            <i class="bi bi-funnel"></i> Apply Filters
+          </button>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Stage Type</label>
+          <select id="stageTypeFilter" class="form-select">
+            <option value="">All Types</option>
+            <option value="build">Build</option>
+            <option value="tests">Tests</option>
+            <option value="deploy">Deploy</option>
+            <option value="security">Security</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    
+    <!-- RESUMEN ESTADÍSTICO -->
+    <div class="row mb-4">
+      <div class="col-md-3">
+        <div class="metric-card">
+          <div class="metric-title">Total Pipelines</div>
+          <div class="metric-value text-dark" id="totalPipelines">0</div>
+          <div class="metric-title">in project</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="metric-card">
+          <div class="metric-title">Total Runs</div>
+          <div class="metric-value text-dark" id="totalRuns">0</div>
+          <div class="metric-title">in selected period</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="metric-card bg-success bg-opacity-10">
+          <div class="metric-title">Successful</div>
+          <div class="metric-value text-success" id="successRuns">0</div>
+          <div class="metric-title"><span id="successRate">0%</span> success rate</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="metric-card bg-danger bg-opacity-10">
+          <div class="metric-title">Failed</div>
+          <div class="metric-value text-danger" id="failedRuns">0</div>
+          <div class="metric-title"><span id="failureRate">0%</span> failure rate</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- GRÁFICOS PRINCIPALES -->
+    <div class="row">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Pipeline Results Overview</span>
+            <span class="badge bg-primary rounded-pill" id="successRateBadge">0%</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="resultsChart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header">Execution Time Statistics (minutes)</div>
+          <div class="card-body">
+            <div class="row text-center">
+              <div class="col">
+                <div class="metric-title">Average</div>
+                <div class="metric-value text-info" id="avgTime">0</div>
+              </div>
+              <div class="col">
+                <div class="metric-title">Median</div>
+                <div class="metric-value text-info" id="medianTime">0</div>
+              </div>
+              <div class="col">
+                <div class="metric-title">95th %ile</div>
+                <div class="metric-value text-info" id="p95Time">0</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card mt-4">
+          <div class="card-header">Failed Stages Distribution</div>
+          <div class="col-md-6">
+            <div class="card mt-4">
+              <div class="card-header">Per-Pipeline Success vs Failure (%)</div>
+              <div class="chart-container">
+                <canvas id="pipelineStatsChart"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="stagesChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- SECCIÓN DE DETALLES CON PESTAÑAS -->
+    <div class="row mt-4">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <ul class="nav nav-tabs card-header-tabs">
+              <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#failedPipelinesTab">
+                  Failed Pipelines <span class="badge bg-danger rounded-pill ms-1" id="failedCountBadge">0</span>
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#errorDetailsTab">
+                  Error Details <span class="badge bg-danger rounded-pill ms-1" id="errorCountBadge">0</span>
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#allPipelinesTab">
+                  All Pipelines <span class="badge bg-primary rounded-pill ms-1" id="allPipelinesBadge">0</span>
+                </a>
+              </li>
+            </ul>
+          </div>
+          <div class="card-body">
+            <div class="tab-content">
+              <!-- PESTAÑA 1: PIPELINES FALLIDOS -->
+              <div class="tab-pane fade show active" id="failedPipelinesTab">
+                <div class="table-responsive">
+                  <table class="table table-hover">
+                    <thead>
+                      <tr>
+                        <th>Pipeline</th>
+                        <th>Run ID</th>
+                        <th>Date</th>
+                        <th>Failed Stages</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="failedPipelinesTable">
+                      <!-- Datos dinámicos -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
+              <!-- PESTAÑA 2: DETALLES DE ERROR -->
+              <div class="tab-pane fade" id="errorDetailsTab">
+                <div id="errorDetailsAccordion" class="accordion">
+                  <!-- Datos dinámicos -->
+                </div>
+              </div>
+              
+              <!-- PESTAÑA 3: TODOS LOS PIPELINES -->
+              <div class="tab-pane fade" id="allPipelinesTab">
+                <div class="table-responsive">
+                  <table class="table table-hover" id="allPipelinesTable">
+                    <thead>
+                      <tr>
+                        <th>Pipeline</th>
+                        <th>Last Run</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <!-- Datos dinámicos -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE DETALLES DE ERROR -->
+  <div class="modal fade" id="errorModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Error Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="errorModalBody">
+          <!-- Contenido dinámico -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <a href="#" id="errorLogsLink" class="btn btn-primary" target="_blank">
+            <i class="bi bi-journal-text"></i> View Logs
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPTS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+  
+  <script>
+    // VARIABLES GLOBALES
+    let resultsChart, stagesChart;
+    let currentData = null;
+    let pipelineStatsChart;
+    let progressInterval;
+    
+    // INICIALIZACIÓN
+    document.addEventListener('DOMContentLoaded', function() {
+      // Configurar tooltips
+      const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+      tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+      });
+      
+      // Event listeners
+      document.getElementById('refreshBtn').addEventListener('click', loadData);
+      document.getElementById('applyFilters').addEventListener('click', loadData);
+      document.getElementById('exportBtn').addEventListener('click', exportData);
+      
+      // Cargar datos iniciales
+      loadData();
+    });
+    
+    // MOSTRAR LOADING
+    function showLoading(message, details) {
+      const overlay = document.getElementById('loadingOverlay');
+      const title = document.getElementById('loadingTitle');
+      const detail = document.getElementById('loadingDetails');
+      
+      title.textContent = message || 'Loading Pipeline Data';
+      detail.textContent = details || 'Please wait...';
+      overlay.style.display = 'flex';
+      
+      // Animación de progreso
+      let progress = 0;
+      document.getElementById('loadingProgress').style.width = '0%';
+      
+      clearInterval(progressInterval);
+      progressInterval = setInterval(() => {
+        progress += Math.random() * 5;
+        if (progress > 90) progress = 90;
+        document.getElementById('loadingProgress').style.width = `${progress}%`;
+      }, 500);
+    }
+    
+    // OCULTAR LOADING
+    function hideLoading() {
+      clearInterval(progressInterval);
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+    
+    // ACTUALIZAR MENSAJE DE LOADING
+    function updateLoading(message, details) {
+      document.getElementById('loadingTitle').textContent = message;
+      document.getElementById('loadingDetails').textContent = details;
+    }
+    
+    // CARGAR DATOS
+    function loadData() {
+      const days = document.getElementById('days').value;
+      const pipelineFilter = document.getElementById('pipelineFilter').value;
+      const stageFilter = document.getElementById('stageFilter').value;
+      
+      
+      showLoading("Loading Pipeline Data", "Fetching data from Azure DevOps...");
+      
+      // Parámetros
+      const params = {
+        days: parseInt(days),
+        pipelineFilter: pipelineFilter,
+        stageFilter: stageFilter,
+        stageTypeFilter: document.getElementById('stageTypeFilter').value
+      };
+      
+      // Llamar al backend
+      google.script.run
+        .withSuccessHandler(function(response) {
+          clearInterval(progressInterval);
+          document.getElementById('loadingProgress').style.width = '100%';
+          
+          setTimeout(() => {
+            hideLoading();
+            
+            if (!response.success) {
+              showAlert('Error: ' + response.error, 'danger');
+              return;
+            }
+            
+            currentData = response.data;
+            updateDashboard(currentData);
+            
+            showAlert(`Data loaded successfully (${response.processingTime}s)`, 'success');
+          }, 500);
+        })
+        .withFailureHandler(function(error) {
+          hideLoading();
+          showAlert('Error loading data: ' + error.message, 'danger');
+          console.error(error);
+        })
+        .getDashboardData(params);
+
+        // Llenar el dropdown de pipelines si está vacío
+        if (document.getElementById('pipelineFilter').options.length <= 1) {
+          populatePipelineFilter();
+}
+    }
+    function populatePipelineFilter() {
+      const filterSelect = document.getElementById('pipelineFilter');
+      
+      // Limpiar opciones existentes (excepto la primera)
+      while (filterSelect.options.length > 1) {
+        filterSelect.remove(1);
+      }
+      
+      if (!currentData || !currentData.allPipelines) return;
+      
+      // Agregar pipelines al dropdown
+      currentData.allPipelines.forEach(pipeline => {
+        const option = document.createElement('option');
+        option.value = pipeline.name;
+        option.textContent = pipeline.name;
+        filterSelect.appendChild(option);
+      });
+    }
+    
+    // EXPORTAR DATOS
+    function exportData() {
+      const days = document.getElementById('days').value;
+      const pipelineFilter = document.getElementById('pipelineFilter').value;
+      const stageFilter = document.getElementById('stageFilter').value;
+      
+      showLoading("Exporting Data", "Generating CSV file...");
+      
+      const params = {
+        days: parseInt(days),
+        pipelineFilter: pipelineFilter,
+        stageFilter: stageFilter
+      };
+      
+      google.script.run
+        .withSuccessHandler(function(csvContent) {
+          hideLoading();
+          
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+          const link = document.createElement('a');
+          const url = URL.createObjectURL(blob);
+          
+          link.setAttribute('href', url);
+          link.setAttribute('download', `azure-pipelines-${new Date().toISOString().slice(0,10)}.csv`);
+          link.style.visibility = 'hidden';
+          
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          showAlert('Export completed successfully', 'success');
+        })
+        .withFailureHandler(function(error) {
+          hideLoading();
+          showAlert('Error exporting data: ' + error.message, 'danger');
+        })
+        .exportToCSV(params);
+    }
+    
+    // ACTUALIZAR DASHBOARD
+    function updateDashboard(data) {
+      // Actualizar métricas principales
+      document.getElementById('totalPipelines').textContent = data.totals.pipelines;
+      document.getElementById('totalRuns').textContent = data.totals.runs;
+      document.getElementById('successRuns').textContent = data.totals.success;
+      document.getElementById('failedRuns').textContent = data.totals.failed;
+      
+      const successRate = data.totals.runs > 0 ? 
+        Math.round((data.totals.success / data.totals.runs) * 100) : 0;
+      const failureRate = data.totals.runs > 0 ? 
+        Math.round((data.totals.failed / data.totals.runs) * 100) : 0;
+      
+      document.getElementById('successRate').textContent = successRate + '%';
+      document.getElementById('failureRate').textContent = failureRate + '%';
+      document.getElementById('successRateBadge').textContent = successRate + '%';
+      
+      // Actualizar estadísticas de tiempo
+      if (data.executionStats) {
+        document.getElementById('avgTime').textContent = data.executionStats.average;
+        document.getElementById('medianTime').textContent = data.executionStats.median;
+        document.getElementById('p95Time').textContent = data.executionStats.percentile95;
+      }
+      
+      // Actualizar contadores
+      document.getElementById('failedCountBadge').textContent = data.failedPipelines.length;
+      document.getElementById('errorCountBadge').textContent = data.errorDetails.length;
+      document.getElementById('allPipelinesBadge').textContent = data.allPipelines.length;
+      
+      // Actualizar gráficos
+      updateResultsChart(data.totals);
+      updateStagesChart(data.stages);
+      updatePipelineStatsChart(data.pipelineStats);
+      
+      // Actualizar tablas
+      updateFailedPipelinesTable(data.failedPipelines);
+      updateErrorDetails(data.errorDetails);
+      updateAllPipelinesTable(data.allPipelines);
+    }
+    /**
+     * ACTUALIZA LA TABLA DE PIPELINES FALLIDOS
+     * @param {Array} failedPipelines - Lista de pipelines fallidos
+     */
+    function updateFailedPipelinesTable(failedPipelines) {
+      const container = document.getElementById('failedPipelinesTable');
+      
+      // Caso cuando no hay pipelines fallidos
+      if (!failedPipelines || failedPipelines.length === 0) {
+        container.innerHTML = `
+          <tr>
+            <td colspan="5" class="text-center py-4 text-muted">
+              <i class="bi bi-check-circle" style="font-size: 2rem;"></i>
+              <p class="mt-2">No failed pipelines found in the selected period</p>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+      
+      // Generar filas de la tabla
+      let html = '';
+      
+      failedPipelines.slice(0, 100).forEach(pipeline => {
+        const date = new Date(pipeline.date).toLocaleString();
+        
+        // Crear badges para cada stage fallido con colores según tipo
+        const stagesHtml = pipeline.stages.map(stage => {
+          // Determinar clase CSS según el tipo de stage
+          let badgeClass = 'bg-danger'; // Por defecto (rojo)
+          let badgeText = 'Error';
+          
+          if (stage.type === 'build') {
+            badgeClass = 'bg-primary';
+            badgeText = 'Build';
+          } else if (stage.type === 'tests') {
+            badgeClass = 'bg-warning text-dark';
+            badgeText = 'Tests';
+          } else if (stage.type === 'deploy') {
+            badgeClass = 'bg-info text-dark';
+            badgeText = 'Deploy';
+          } else if (stage.type === 'security') {
+            badgeClass = 'bg-purple';
+            badgeText = 'Security';
+          }
+          
+          return `
+            <span class="badge ${badgeClass} me-1 mb-1" 
+                  data-bs-toggle="tooltip" 
+                  title="${stage.name}">
+              ${badgeText}
+            </span>
+          `;
+        }).join('');
+        
+        // Crear fila de la tabla
+        html += `
+          <tr>
+            <td>${pipeline.name}</td>
+            <td>${pipeline.runId}</td>
+            <td>${date}</td>
+            <td>${stagesHtml}</td>
+            <td>
+              <a href="${pipeline.url}" target="_blank" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-box-arrow-up-right"></i> View
+              </a>
+              ${pipeline.stageErrors.length > 0 ? `
+                <button class="btn btn-sm btn-outline-danger ms-2 view-errors" 
+                  data-pipeline="${pipeline.name}" 
+                  data-runid="${pipeline.runId}"
+                  data-errors='${JSON.stringify(pipeline.stageErrors)}'>
+                  <i class="bi bi-exclamation-triangle"></i> Details
+                </button>
+              ` : ''}
+            </td>
+          </tr>
+        `;
+      });
+      
+      container.innerHTML = html;
+      
+      // Inicializar tooltips de Bootstrap
+      const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+      tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+      });
+      
+      // Configurar event listeners para los botones de error
+      document.querySelectorAll('.view-errors').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const errors = JSON.parse(this.getAttribute('data-errors'));
+          showErrorModal(this.getAttribute('data-pipeline'), this.getAttribute('data-runid'), errors);
+        });
+      });
+    }
+    // [Resto de funciones (updateResultsChart, updateStagesChart, etc.)...]
+    /**
+ * ACTUALIZA EL CHART DE ESTADÍSTICAS POR PIPELINE
+ * @param {Object} stats - Objeto con claves de pipeline y valores { successRate, failureRate }
+ */
+function updatePipelineStatsChart(stats) {
+  const labels = Object.keys(stats);
+  const successData = labels.map(name => stats[name].successRate);
+  const failureData = labels.map(name => stats[name].failureRate);
+  if (pipelineStatsChart) {
+    pipelineStatsChart.destroy();
+  }
+  pipelineStatsChart = new Chart(document.getElementById('pipelineStatsChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Success %', data: successData, datalabels: { anchor: 'end', align: 'end' } },
+        { label: 'Failure %', data: failureData, datalabels: { anchor: 'end', align: 'end' } }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: { mode: 'index', intersect: false },
+        datalabels: { formatter: v => v + '%', font: { weight: 'bold' } }
+      },
+      scales: {
+        y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } }
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+}
+  </script>
+</body>
+</html>
