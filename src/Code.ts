@@ -108,129 +108,138 @@ function getDashboardData(params) {
     var cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
     
-    // 5. PROCESAR CADA PIPELINE (BUCLE COMPLETO)
+    // 5. PREPARAR SOLICITUDES DE EJECUCIONES
+    var runRequests = [];
+    var pipelinesToProcess = [];
     pipelines.value.forEach(function(pipeline, index) {
       // Aplicar filtro por nombre de pipeline
       if (pipelineFilter && !pipelineFilter.test(pipeline.name)) {
         analysis.progress.processed++;
         return;
       }
-      
+
       analysis.totals.pipelines++;
       analysis.allPipelines.push({
         id: pipeline.id,
         name: pipeline.name,
         url: `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build?definitionId=${pipeline.id}`
       });
-      
-      // 6. OBTENER EJECUCIONES PARA ESTE PIPELINE
+
       console.log(`Procesando pipeline ${index + 1}/${pipelines.value.length}: ${pipeline.name}`);
-      var runs = getPipelineRuns(pipeline.id);
+
+      pipelinesToProcess.push(pipeline);
+      runRequests.push(`pipelines/${pipeline.id}/runs?$top=${CONFIG.maxRuns}&api-version=7.1-preview.1`);
+    });
+
+    var runResponses = callAzureApiBatch(runRequests);
+
+    var detailRequests = [];
+    var detailInfo = [];
+
+    runResponses.forEach(function(runs, idx) {
+      var pipeline = pipelinesToProcess[idx];
       if (!runs || !runs.value) {
         analysis.progress.processed++;
         return;
       }
-      
-      // 7. PROCESAR CADA EJECUCIÓN (BUCLE COMPLETO)
+
       runs.value.slice(0, CONFIG.maxRuns).forEach(function(run) {
-        // Filtrar por fecha
         if (!run.finishedDate || new Date(run.finishedDate) < cutoffDate) return;
-        
+
         analysis.totals.runs++;
         var result = run.result ? run.result.toLowerCase() : 'other';
-        
-        // 8. CONTABILIZAR POR ESTADO
+
         if (result === 'succeeded') analysis.totals.success++;
         else if (result === 'failed') analysis.totals.failed++;
         else analysis.totals.other++;
-        
-        // Contadores por pipeline
+
         if (!analysis.pipelineStats[pipeline.name]) {
           analysis.pipelineStats[pipeline.name] = { success: 0, failed: 0, other: 0 };
         }
         if (result === 'succeeded') analysis.pipelineStats[pipeline.name].success++;
         else if (result === 'failed') analysis.pipelineStats[pipeline.name].failed++;
         else analysis.pipelineStats[pipeline.name].other++;
-        
-        // 9. REGISTRAR TIEMPO DE EJECUCIÓN
+
         if (run.createdDate && run.finishedDate) {
-          var duration = (new Date(run.finishedDate) - new Date(run.createdDate)) / 60000; // en minutos
+          var duration = (new Date(run.finishedDate) - new Date(run.createdDate)) / 60000;
           analysis.executionTimes.push({
             pipeline: pipeline.name,
             runId: run.id,
             duration: duration
           });
         }
-        
-        // 10. ANALIZAR FALLOS (DETALLE COMPLETO)
+
         if (result === 'failed') {
-          var details = getRunDetails(pipeline.id, run.id);
-          if (!details || !details.stages) return;
-          
-          var failedStages = [];
-          var stageErrors = [];
-          
-          // 11. PROCESAR CADA STAGE FALLIDO
-          details.stages.forEach(function(stage) {
-            if (stage.result && stage.result.toLowerCase() === 'failed') {
-              // Clasificar el stage por tipo
-              const stageName = stage.name.toLowerCase();
-              let stageType = 'other';
-
-              if (stageName.includes('test')) stageType = 'tests';
-              else if (stageName.includes('build')) stageType = 'build';
-              else if (stageName.includes('deploy')) stageType = 'deploy';
-              else if (stageName.includes('secure')) stageType = 'security';
-
-              // Aplicar filtros de stage
-              if (stageFilter && !stageFilter.test(stage.name)) return;
-              if (stageTypeFilter && stageType !== stageTypeFilter) return;
-
-              failedStages.push({
-                name: stage.name,
-                type: stageType
-              });
-              
-              // 12. CAPTURAR DETALLES DEL ERROR
-              var errorInfo = {
-                pipeline: pipeline.name,
-                runId: run.id,
-                stage: stage.name,
-                errors: [],
-                logUrl: stage.logs?.url ? 
-                  `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build/results?buildId=${run.id}&view=logs` : null
-              };
-              
-              if (stage.error) errorInfo.errors.push(stage.error);
-              if (stage.issues) errorInfo.errors = errorInfo.errors.concat(stage.issues);
-              
-              if (errorInfo.errors.length > 0) {
-                stageErrors.push(errorInfo);
-              }
-              
-              // 13. CONTABILIZAR FALLOS POR STAGE
-              analysis.stages[stage.name] = (analysis.stages[stage.name] || 0) + 1;
-            }
-          });
-          
-          // 14. REGISTRAR PIPELINE FALLIDO
-          if (failedStages.length > 0) {
-            analysis.failedPipelines.push({
-              id: pipeline.id,
-              name: pipeline.name,
-              runId: run.id,
-              date: run.finishedDate,
-              url: `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build/results?buildId=${run.id}`,
-              stages: failedStages,
-              stageErrors: stageErrors
-            });
-            
-            analysis.errorDetails = analysis.errorDetails.concat(stageErrors);
-          }
+          detailRequests.push(`pipelines/${pipeline.id}/runs/${run.id}?api-version=7.1-preview.1`);
+          detailInfo.push({ pipeline: pipeline, run: run });
         }
       });
-      
+
       analysis.progress.processed++;
+    });
+
+    var detailResponses = callAzureApiBatch(detailRequests);
+
+    detailResponses.forEach(function(details, idx) {
+      var info = detailInfo[idx];
+      var pipeline = info.pipeline;
+      var run = info.run;
+      if (!details || !details.stages) return;
+
+      var failedStages = [];
+      var stageErrors = [];
+
+      details.stages.forEach(function(stage) {
+        if (stage.result && stage.result.toLowerCase() === 'failed') {
+          const stageName = stage.name.toLowerCase();
+          let stageType = 'other';
+
+          if (stageName.includes('test')) stageType = 'tests';
+          else if (stageName.includes('build')) stageType = 'build';
+          else if (stageName.includes('deploy')) stageType = 'deploy';
+          else if (stageName.includes('secure')) stageType = 'security';
+
+          if (stageFilter && !stageFilter.test(stage.name)) return;
+          if (stageTypeFilter && stageType !== stageTypeFilter) return;
+
+          failedStages.push({
+            name: stage.name,
+            type: stageType
+          });
+
+          var errorInfo = {
+            pipeline: pipeline.name,
+            runId: run.id,
+            stage: stage.name,
+            errors: [],
+            logUrl: stage.logs?.url ?
+              `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build/results?buildId=${run.id}&view=logs` : null
+          };
+
+          if (stage.error) errorInfo.errors.push(stage.error);
+          if (stage.issues) errorInfo.errors = errorInfo.errors.concat(stage.issues);
+
+          if (errorInfo.errors.length > 0) {
+            stageErrors.push(errorInfo);
+          }
+
+          analysis.stages[stage.name] = (analysis.stages[stage.name] || 0) + 1;
+        }
+      });
+
+      if (failedStages.length > 0) {
+        analysis.failedPipelines.push({
+          id: pipeline.id,
+          name: pipeline.name,
+          runId: run.id,
+          date: run.finishedDate,
+          url: `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build/results?buildId=${run.id}`,
+          stages: failedStages,
+          stageErrors: stageErrors
+        });
+
+        analysis.errorDetails = analysis.errorDetails.concat(stageErrors);
+      }
     });
     
     // 15. CALCULAR PORCENTAJES DE STAGES
@@ -293,45 +302,66 @@ function exportToCSV(params) {
   // 1. ENCABEZADOS CSV
   csvContent.push("Pipeline,Run ID,Status,Date,Duration (min),Failed Stages,Errors,Log URL");
   
-  // 2. PROCESAR TODOS LOS PIPELINES
+  // 2. PREPARAR SOLICITUDES DE EJECUCIONES
+  var runRequests = [];
+  var pipelinesToProcess = [];
   data.data.allPipelines.forEach(function(pipeline) {
-    var runs = getPipelineRuns(pipeline.id);
-    if (!runs.value) return;
-    
-    // 3. PROCESAR CADA EJECUCIÓN
+    pipelinesToProcess.push(pipeline);
+    runRequests.push(`pipelines/${pipeline.id}/runs?$top=${CONFIG.maxRuns}&api-version=7.1-preview.1`);
+  });
+
+  var runResponses = callAzureApiBatch(runRequests);
+
+  var detailRequests = [];
+  var detailInfo = [];
+  var rows = [];
+
+  runResponses.forEach(function(runs, idx) {
+    var pipeline = pipelinesToProcess[idx];
+    if (!runs || !runs.value) return;
+
     runs.value.forEach(function(run) {
       var row = [
-        `"${pipeline.name.replace(/"/g, '""')}"`,  // Escape de comillas
+        `"${pipeline.name.replace(/"/g, '""')}"`,
         run.id,
         run.result || 'unknown',
         run.finishedDate || '',
-        run.createdDate && run.finishedDate ? 
+        run.createdDate && run.finishedDate ?
           ((new Date(run.finishedDate) - new Date(run.createdDate)) / 60000).toFixed(2) : '',
         '',
         '',
         run.url || ''
       ];
-      
-      // 4. AGREGAR DETALLES DE FALLOS
+      var rowIndex = rows.length;
+      rows.push(row);
+
       if (run.result && run.result.toLowerCase() === 'failed') {
-        var details = getRunDetails(pipeline.id, run.id);
-        if (details && details.stages) {
-          // 5. STAGES FALLIDOS
-          var failedStages = details.stages
-            .filter(s => s.result && s.result.toLowerCase() === 'failed')
-            .map(s => s.name);
-          row[5] = `"${failedStages.join('; ').replace(/"/g, '""')}"`;
-          
-          // 6. DETALLES DE ERROR
-          var errors = details.stages
-            .filter(s => s.error || s.issues)
-            .map(s => (s.error || '') + (s.issues ? '; ' + s.issues.join('; ') : ''));
-          row[6] = `"${errors.join(' | ').replace(/"/g, '""')}"`;
-        }
+        detailRequests.push(`pipelines/${pipeline.id}/runs/${run.id}?api-version=7.1-preview.1`);
+        detailInfo.push({ index: rowIndex });
       }
-      
-      csvContent.push(row.join(','));
     });
+  });
+
+  var detailResponses = callAzureApiBatch(detailRequests);
+
+  detailResponses.forEach(function(details, idx) {
+    var info = detailInfo[idx];
+    var row = rows[info.index];
+    if (!details || !details.stages) return;
+
+    var failedStages = details.stages
+      .filter(function(s) { return s.result && s.result.toLowerCase() === 'failed'; })
+      .map(function(s) { return s.name; });
+    row[5] = `"${failedStages.join('; ').replace(/"/g, '""')}"`;
+
+    var errors = details.stages
+      .filter(function(s) { return s.error || s.issues; })
+      .map(function(s) { return (s.error || '') + (s.issues ? '; ' + s.issues.join('; ') : ''); });
+    row[6] = `"${errors.join(' | ').replace(/"/g, '""')}"`;
+  });
+
+  rows.forEach(function(r) {
+    csvContent.push(r.join(','));
   });
   
   return csvContent.join('\n');
@@ -372,7 +402,7 @@ function getRunDetails(pipelineId, runId) {
  * @return {Object} Respuesta parseada
  */
 function callAzureApi(endpoint) {
-  var url = endpoint.startsWith('http') ? endpoint : 
+  var url = endpoint.startsWith('http') ? endpoint :
     `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_apis/${endpoint}`;
   
   var options = {
@@ -389,6 +419,44 @@ function callAzureApi(endpoint) {
   } catch (e) {
     console.error("API Error:", e, "Endpoint:", url);
     return null;
+  }
+}
+
+/**
+ * LLAMADAS EN BATCH A API AZURE DEVOPS
+ * @param {Array<string>} endpoints - Lista de endpoints
+ * @return {Array<Object>} Respuestas parseadas
+ */
+function callAzureApiBatch(endpoints) {
+  if (!endpoints || endpoints.length === 0) return [];
+
+  var options = {
+    headers: {
+      'Authorization': 'Basic ' + Utilities.base64Encode(':' + getPatToken()),
+      'Content-Type': 'application/json'
+    },
+    muteHttpExceptions: true
+  };
+
+  var requests = endpoints.map(function(ep) {
+    var url = ep.startsWith('http') ? ep :
+      `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_apis/${ep}`;
+    return { url: url, headers: options.headers, muteHttpExceptions: true };
+  });
+
+  try {
+    var responses = UrlFetchApp.fetchAll(requests);
+    return responses.map(function(res) {
+      try {
+        return JSON.parse(res.getContentText());
+      } catch (e) {
+        console.error('Batch parse error', e);
+        return null;
+      }
+    });
+  } catch (e) {
+    console.error('Batch API Error', e);
+    return endpoints.map(function() { return null; });
   }
 }
 
