@@ -12,7 +12,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.1.0"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 
   <style>
     /* ESTILOS PRINCIPALES */
@@ -339,16 +338,25 @@
         
         <div class="card mt-4">
           <div class="card-header">Failed Stages Distribution</div>
-          <div class="col-md-6">
-            <div class="card mt-4">
-              <div class="card-header">Per-Pipeline Success vs Failure (%)</div>
-              <div class="chart-container">
-                <canvas id="pipelineStatsChart"></canvas>
-              </div>
-            </div>
-          </div>
           <div class="chart-container">
             <canvas id="stagesChart"></canvas>
+          </div>
+        </div>
+
+        <div class="card mt-4">
+          <div class="card-header">Per-Pipeline Metrics</div>
+          <div class="table-responsive">
+            <table class="table table-sm" id="pipelineStatsTable">
+              <thead>
+                <tr>
+                  <th>Pipeline</th>
+                  <th>Success %</th>
+                  <th>Failure %</th>
+                  <th>Avg Duration (min)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -460,7 +468,6 @@
     // VARIABLES GLOBALES
     let resultsChart, stagesChart;
     let currentData = null;
-    let pipelineStatsChart;
     let progressInterval;
 
     // INICIALIZACIÓN
@@ -691,7 +698,7 @@
       // Actualizar gráficos
       updateResultsChart(data.totals);
       updateStagesChart(data.stages);
-      updatePipelineStatsChart(data.pipelineStats);
+      updatePipelineStatsTable(data.pipelineStats);
       
       // Actualizar tablas
       updateFailedPipelinesTable(data.failedPipelines);
@@ -857,9 +864,9 @@
         html += `
           <tr>
             <td>${p.name}</td>
-            <td>${p.id}</td>
-            <td></td>
-            <td></td>
+            <td>${p.lastRun ? new Date(p.lastRun).toLocaleString() : ''}</td>
+            <td>${p.lastStatus || ''}</td>
+            <td>${p.lastDuration || ''}</td>
             <td><a href="${p.url}" target="_blank" class="btn btn-sm btn-outline-primary">View</a></td>
           </tr>`;
       });
@@ -895,35 +902,19 @@
  * ACTUALIZA EL CHART DE ESTADÍSTICAS POR PIPELINE
  * @param {Object} stats - Objeto con claves de pipeline y valores { successRate, failureRate }
  */
-function updatePipelineStatsChart(stats) {
+function updatePipelineStatsTable(stats) {
+  const tbody = document.querySelector('#pipelineStatsTable tbody');
   const labels = Object.keys(stats);
-  const successData = labels.map(name => stats[name].successRate);
-  const failureData = labels.map(name => stats[name].failureRate);
-  if (pipelineStatsChart) {
-    pipelineStatsChart.destroy();
+  if (labels.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data</td></tr>';
+    return;
   }
-  pipelineStatsChart = new Chart(document.getElementById('pipelineStatsChart'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Success %', data: successData, datalabels: { anchor: 'end', align: 'end' } },
-        { label: 'Failure %', data: failureData, datalabels: { anchor: 'end', align: 'end' } }
-      ]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { position: 'top' },
-        tooltip: { mode: 'index', intersect: false },
-        datalabels: { formatter: v => v + '%', font: { weight: 'bold' } }
-      },
-      scales: {
-        y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } }
-      }
-    },
-    plugins: [ChartDataLabels]
+  let html = '';
+  labels.forEach(name => {
+    const s = stats[name];
+    html += `<tr><td>${name}</td><td>${s.successRate}%</td><td>${s.failureRate}%</td><td>${s.avgDuration}</td></tr>`;
   });
+  tbody.innerHTML = html;
 }
   </script>
 </body>

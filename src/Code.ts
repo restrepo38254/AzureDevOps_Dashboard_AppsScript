@@ -119,6 +119,7 @@ function getDashboardData(params) {
     var pipelinesToProcess = [];
     var runResponses = [];
     var pipelinesOrdered = [];
+    var pipelineObjects = [];
     pipelines.value.forEach(function(pipeline, index) {
       // Aplicar filtro por nombre de pipeline
       if (pipelineFilter && !pipelineFilter.test(pipeline.name)) {
@@ -127,11 +128,16 @@ function getDashboardData(params) {
       }
 
       analysis.totals.pipelines++;
-      analysis.allPipelines.push({
+      var pipelineObj = {
         id: pipeline.id,
         name: pipeline.name,
-        url: `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build?definitionId=${pipeline.id}`
-      });
+        url: `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build?definitionId=${pipeline.id}`,
+        lastRun: null,
+        lastStatus: null,
+        lastDuration: null
+      };
+      analysis.allPipelines.push(pipelineObj);
+      pipelineObjects.push(pipelineObj);
 
       console.log(`Procesando pipeline ${index + 1}/${pipelines.value.length}: ${pipeline.name}`);
 
@@ -158,12 +164,15 @@ function getDashboardData(params) {
 
     runResponses.forEach(function(runs, idx) {
       var pipeline = pipelinesOrdered[idx];
+      var pipelineObj = pipelineObjects[idx];
       if (!runs || !runs.value) {
         analysis.progress.processed++;
         return;
       }
 
+      var firstValid = true;
       runs.value.slice(0, CONFIG.maxRuns).forEach(function(run) {
+        var duration = null;
         if (!run.finishedDate || new Date(run.finishedDate) < cutoffDate) return;
 
         analysis.totals.runs++;
@@ -174,19 +183,27 @@ function getDashboardData(params) {
         else analysis.totals.other++;
 
         if (!analysis.pipelineStats[pipeline.name]) {
-          analysis.pipelineStats[pipeline.name] = { success: 0, failed: 0, other: 0 };
+          analysis.pipelineStats[pipeline.name] = { success: 0, failed: 0, other: 0, durations: [] };
         }
         if (result === 'succeeded') analysis.pipelineStats[pipeline.name].success++;
         else if (result === 'failed') analysis.pipelineStats[pipeline.name].failed++;
         else analysis.pipelineStats[pipeline.name].other++;
 
         if (run.createdDate && run.finishedDate) {
-          var duration = (new Date(run.finishedDate) - new Date(run.createdDate)) / 60000;
+          duration = (new Date(run.finishedDate) - new Date(run.createdDate)) / 60000;
           analysis.executionTimes.push({
             pipeline: pipeline.name,
             runId: run.id,
             duration: duration
           });
+          analysis.pipelineStats[pipeline.name].durations.push(duration);
+        }
+
+        if (firstValid) {
+          pipelineObj.lastRun = run.finishedDate;
+          pipelineObj.lastStatus = run.result || 'unknown';
+          pipelineObj.lastDuration = duration ? duration.toFixed(2) : null;
+          firstValid = false;
         }
 
         if (result === 'failed') {
@@ -216,7 +233,18 @@ function getDashboardData(params) {
       var info = detailInfo[idx];
       var pipeline = info.pipeline;
       var run = info.run;
-      if (!details || !details.stages) return;
+      if (!details || !details.stages) {
+        analysis.failedPipelines.push({
+          id: pipeline.id,
+          name: pipeline.name,
+          runId: run.id,
+          date: run.finishedDate,
+          url: `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build/results?buildId=${run.id}`,
+          stages: [],
+          stageErrors: []
+        });
+        return;
+      }
 
       var failedStages = [];
       var stageErrors = [];
@@ -259,19 +287,17 @@ function getDashboardData(params) {
         }
       });
 
-      if (failedStages.length > 0) {
-        analysis.failedPipelines.push({
-          id: pipeline.id,
-          name: pipeline.name,
-          runId: run.id,
-          date: run.finishedDate,
-          url: `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build/results?buildId=${run.id}`,
-          stages: failedStages,
-          stageErrors: stageErrors
-        });
+      analysis.failedPipelines.push({
+        id: pipeline.id,
+        name: pipeline.name,
+        runId: run.id,
+        date: run.finishedDate,
+        url: `${CONFIG.azureDevOpsUrl}/${CONFIG.projectName}/_build/results?buildId=${run.id}`,
+        stages: failedStages,
+        stageErrors: stageErrors
+      });
 
-        analysis.errorDetails = analysis.errorDetails.concat(stageErrors);
-      }
+      analysis.errorDetails = analysis.errorDetails.concat(stageErrors);
     });
     
     // 15. CALCULAR PORCENTAJES DE STAGES
@@ -289,6 +315,12 @@ function getDashboardData(params) {
       var total = stats.success + stats.failed + stats.other;
       stats.successRate = total ? ((stats.success / total) * 100).toFixed(2) : '0.00';
       stats.failureRate = total ? ((stats.failed / total) * 100).toFixed(2) : '0.00';
+      if (stats.durations && stats.durations.length) {
+        var sum = stats.durations.reduce(function(a, b) { return a + b; }, 0);
+        stats.avgDuration = (sum / stats.durations.length).toFixed(2);
+      } else {
+        stats.avgDuration = '0.00';
+      }
     }
     // 16. CALCULAR ESTADÍSTICAS DE TIEMPO
     analysis.executionStats = calculateStats(analysis.executionTimes.map(x => x.duration));
