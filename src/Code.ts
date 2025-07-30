@@ -12,10 +12,12 @@ var CONFIG = {
 var CACHE = {
   pipelines: null,         // Cache para listado de pipelines
   runs: {},                // Cache para ejecuciones por pipeline
+  runDetails: {},          // Cache para detalles de ejecuciones fallidas
   statistics: null,        // Cache para estadísticas
   projects: null,          // Cache para proyectos de Azure DevOps
   lastUpdated: null,       // Fecha última actualización
-  currentParams: null      // Parámetros actuales de filtrado
+  currentParams: null,     // Parámetros actuales de filtrado
+  baseParams: null         // Parámetros base (proyecto y rango de días)
 };
 
 /**
@@ -65,6 +67,10 @@ function getDashboardData(params) {
     var stageFilter = params.stageFilter ? new RegExp(params.stageFilter, 'i') : null;
     var stageTypeFilter = params.stageTypeFilter ? params.stageTypeFilter.toLowerCase() : null;
     var cacheKey = JSON.stringify(params);
+    var baseKey = JSON.stringify({ projectName: CONFIG.projectName, days: days });
+    var useCachedRuns = CACHE.baseParams === baseKey &&
+      CACHE.lastUpdated &&
+      (new Date() - CACHE.lastUpdated) < (CONFIG.cacheDuration * 60 * 1000);
     // 2. VERIFICAR CACHÉ (COMPROBACIÓN COMPLETA)
     if (CACHE.statistics && 
         CACHE.lastUpdated && 
@@ -111,6 +117,8 @@ function getDashboardData(params) {
     // 5. PREPARAR SOLICITUDES DE EJECUCIONES
     var runRequests = [];
     var pipelinesToProcess = [];
+    var runResponses = [];
+    var pipelinesOrdered = [];
     pipelines.value.forEach(function(pipeline, index) {
       // Aplicar filtro por nombre de pipeline
       if (pipelineFilter && !pipelineFilter.test(pipeline.name)) {
@@ -127,17 +135,29 @@ function getDashboardData(params) {
 
       console.log(`Procesando pipeline ${index + 1}/${pipelines.value.length}: ${pipeline.name}`);
 
-      pipelinesToProcess.push(pipeline);
-      runRequests.push(`pipelines/${pipeline.id}/runs?$top=${CONFIG.maxRuns}&api-version=7.1-preview.1`);
+      var cachedRuns = useCachedRuns && CACHE.runs[pipeline.id];
+      if (cachedRuns) {
+        runResponses.push(cachedRuns);
+        pipelinesOrdered.push(pipeline);
+      } else {
+        pipelinesToProcess.push(pipeline);
+        runRequests.push(`pipelines/${pipeline.id}/runs?$top=${CONFIG.maxRuns}&api-version=7.1-preview.1`);
+      }
     });
-
-    var runResponses = callAzureApiBatch(runRequests);
+    var fetchedRuns = callAzureApiBatch(runRequests);
+    fetchedRuns.forEach(function(res, idx) {
+      var pipeline = pipelinesToProcess[idx];
+      CACHE.runs[pipeline.id] = res;
+      runResponses.push(res);
+      pipelinesOrdered.push(pipeline);
+    });
 
     var detailRequests = [];
     var detailInfo = [];
+    var detailResponses = [];
 
     runResponses.forEach(function(runs, idx) {
-      var pipeline = pipelinesToProcess[idx];
+      var pipeline = pipelinesOrdered[idx];
       if (!runs || !runs.value) {
         analysis.progress.processed++;
         return;
@@ -170,15 +190,27 @@ function getDashboardData(params) {
         }
 
         if (result === 'failed') {
-          detailRequests.push(`pipelines/${pipeline.id}/runs/${run.id}?api-version=7.1-preview.1`);
-          detailInfo.push({ pipeline: pipeline, run: run });
+          var cachedDetail = useCachedRuns && CACHE.runDetails[pipeline.id] && CACHE.runDetails[pipeline.id][run.id];
+          if (cachedDetail) {
+            detailResponses.push(cachedDetail);
+            detailInfo.push({ pipeline: pipeline, run: run });
+          } else {
+            detailRequests.push(`pipelines/${pipeline.id}/runs/${run.id}?api-version=7.1-preview.1`);
+            detailInfo.push({ pipeline: pipeline, run: run });
+          }
         }
       });
 
       analysis.progress.processed++;
     });
 
-    var detailResponses = callAzureApiBatch(detailRequests);
+    var fetchedDetails = callAzureApiBatch(detailRequests);
+    fetchedDetails.forEach(function(res, idx) {
+      var info = detailInfo[idx];
+      CACHE.runDetails[info.pipeline.id] = CACHE.runDetails[info.pipeline.id] || {};
+      CACHE.runDetails[info.pipeline.id][info.run.id] = res;
+      detailResponses.push(res);
+    });
 
     detailResponses.forEach(function(details, idx) {
       var info = detailInfo[idx];
@@ -265,6 +297,7 @@ function getDashboardData(params) {
     CACHE.statistics = analysis;
     CACHE.lastUpdated = new Date();
     CACHE.currentParams = cacheKey;
+    CACHE.baseParams = baseKey;
     
     var endTime = new Date();
     var processingTime = (endTime - startTime) / 1000;
@@ -487,10 +520,12 @@ function clearCache() {
   CACHE = {
     pipelines: null,
     runs: {},
+    runDetails: {},
     statistics: null,
     projects: null,
     lastUpdated: null,
-    currentParams: null
+    currentParams: null,
+    baseParams: null
   };
   console.log("Cache cleared manually");
   return {
