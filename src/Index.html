@@ -229,6 +229,10 @@
     <div class="filter-section">
       <div class="row g-3">
         <div class="col-md-3">
+          <label class="form-label">Project</label>
+          <select id="projectSelect" class="form-select"></select>
+        </div>
+        <div class="col-md-3">
           <label class="form-label">Time Period</label>
           <select id="days" class="form-select">
             <option value="7">Last 7 days</option>
@@ -457,7 +461,7 @@
     let currentData = null;
     let pipelineStatsChart;
     let progressInterval;
-    
+
     // INICIALIZACIÓN
     document.addEventListener('DOMContentLoaded', function() {
       // Configurar tooltips
@@ -471,8 +475,8 @@
       document.getElementById('applyFilters').addEventListener('click', loadData);
       document.getElementById('exportBtn').addEventListener('click', exportData);
       
-      // Cargar datos iniciales
-      loadData();
+      // Obtener proyectos y luego cargar datos
+      loadProjects().then(loadData);
     });
     
     // MOSTRAR LOADING
@@ -508,10 +512,30 @@
       document.getElementById('loadingTitle').textContent = message;
       document.getElementById('loadingDetails').textContent = details;
     }
+
+    // Cargar lista de proyectos y llenar el selector
+    function loadProjects() {
+      return new Promise(function(resolve) {
+        google.script.run.withSuccessHandler(function(data) {
+          const select = document.getElementById('projectSelect');
+          select.innerHTML = '';
+          if (data && data.value) {
+            data.value.forEach(function(p) {
+              const opt = document.createElement('option');
+              opt.value = p.name;
+              opt.textContent = p.name;
+              select.appendChild(opt);
+            });
+          }
+          resolve();
+        }).listProjects();
+      });
+    }
     
     // CARGAR DATOS
     function loadData() {
       const days = document.getElementById('days').value;
+      const projectName = document.getElementById('projectSelect').value;
       const pipelineFilter = document.getElementById('pipelineFilter').value;
       const stageFilter = document.getElementById('stageFilter').value;
       
@@ -521,6 +545,7 @@
       // Parámetros
       const params = {
         days: parseInt(days),
+        projectName: projectName,
         pipelineFilter: pipelineFilter,
         stageFilter: stageFilter,
         stageTypeFilter: document.getElementById('stageTypeFilter').value

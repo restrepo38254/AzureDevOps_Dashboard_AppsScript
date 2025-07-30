@@ -3,7 +3,6 @@ var CONFIG = {
   azureDevOpsUrl: "https://dev.azure.com/GrupoNutresa",  // Reemplaza {organization}
   projectName: "Novaventa",                      // Reemplaza con tu proyecto
   apiVersion: "7.1-preview.1",                             // Versión más reciente de API
-  patToken: "",                      // Tu PAT de Azure DevOps
   maxPipelines: 500,                                       // Límite aumentado de pipelines
   maxRuns: 100,                                            // Máximo de ejecuciones por pipeline
   cacheDuration: 15                                        // Minutos de caché
@@ -14,9 +13,27 @@ var CACHE = {
   pipelines: null,         // Cache para listado de pipelines
   runs: {},                // Cache para ejecuciones por pipeline
   statistics: null,        // Cache para estadísticas
+  projects: null,          // Cache para proyectos de Azure DevOps
   lastUpdated: null,       // Fecha última actualización
   currentParams: null      // Parámetros actuales de filtrado
 };
+
+/**
+ * Obtiene el token PAT almacenado en las propiedades del script.
+ * Se debe configurar previamente mediante setPatToken().
+ * @return {string} PAT para autenticación
+ */
+function getPatToken() {
+  return PropertiesService.getScriptProperties().getProperty('PAT_TOKEN') || '';
+}
+
+/**
+ * Guarda el token PAT de forma segura en las propiedades del script.
+ * @param {string} token - PAT de Azure DevOps
+ */
+function setPatToken(token) {
+  PropertiesService.getScriptProperties().setProperty('PAT_TOKEN', token);
+}
 
 /**
  * FUNCIÓN PRINCIPAL PARA WEB APPS - REQUERIDA
@@ -37,9 +54,12 @@ function doGet(e) {
 function getDashboardData(params) {
   var startTime = new Date();
   console.log("Iniciando carga de datos - Hora de inicio: " + startTime.toISOString());
-  
+
   try {
     // 1. PROCESAR PARÁMETROS DE FILTRADO
+    if (params.projectName) {
+      CONFIG.projectName = params.projectName;
+    }
     var days = params.days || 30;
     var pipelineFilter = params.pipelineFilter ? new RegExp(params.pipelineFilter, 'i') : null;
     var stageFilter = params.stageFilter ? new RegExp(params.stageFilter, 'i') : null;
@@ -357,7 +377,7 @@ function callAzureApi(endpoint) {
   
   var options = {
     headers: {
-      'Authorization': 'Basic ' + Utilities.base64Encode(':' + CONFIG.patToken),
+      'Authorization': 'Basic ' + Utilities.base64Encode(':' + getPatToken()),
       'Content-Type': 'application/json'
     },
     muteHttpExceptions: true
@@ -400,6 +420,7 @@ function clearCache() {
     pipelines: null,
     runs: {},
     statistics: null,
+    projects: null,
     lastUpdated: null,
     currentParams: null
   };
@@ -417,4 +438,25 @@ function clearCache() {
  */
 function getRepositories() {
   return callAzureApi("git/repositories?api-version=" + CONFIG.apiVersion);
+}
+
+/**
+ * Obtener lista de proyectos disponibles en la organización
+ * El resultado se cachea para evitar llamadas repetitivas
+ * @return {Object} Respuesta de API
+ */
+function getProjects() {
+  if (CACHE.projects) {
+    return CACHE.projects;
+  }
+  var result = callAzureApi(`${CONFIG.azureDevOpsUrl}/_apis/projects?api-version=${CONFIG.apiVersion}`);
+  CACHE.projects = result;
+  return result;
+}
+
+/**
+ * Método expuesto al frontend para obtener la lista de proyectos
+ */
+function listProjects() {
+  return getProjects();
 }
