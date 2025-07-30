@@ -63,6 +63,7 @@ function getDashboardData(params) {
     var days = params.days || 30;
     var pipelineFilter = params.pipelineFilter ? new RegExp(params.pipelineFilter, 'i') : null;
     var stageFilter = params.stageFilter ? new RegExp(params.stageFilter, 'i') : null;
+    var stageTypeFilter = params.stageTypeFilter ? params.stageTypeFilter.toLowerCase() : null;
     var cacheKey = JSON.stringify(params);
     // 2. VERIFICAR CACHÉ (COMPROBACIÓN COMPLETA)
     if (CACHE.statistics && 
@@ -102,7 +103,6 @@ function getDashboardData(params) {
         processed: 0
       }
     };
-    analysis.pipelineStats = [];
     analysis.pipelineStats = {};
     
     var cutoffDate = new Date();
@@ -176,12 +176,16 @@ function getDashboardData(params) {
               // Clasificar el stage por tipo
               const stageName = stage.name.toLowerCase();
               let stageType = 'other';
-              
+
               if (stageName.includes('test')) stageType = 'tests';
               else if (stageName.includes('build')) stageType = 'build';
               else if (stageName.includes('deploy')) stageType = 'deploy';
               else if (stageName.includes('secure')) stageType = 'security';
-              
+
+              // Aplicar filtros de stage
+              if (stageFilter && !stageFilter.test(stage.name)) return;
+              if (stageTypeFilter && stageType !== stageTypeFilter) return;
+
               failedStages.push({
                 name: stage.name,
                 type: stageType
