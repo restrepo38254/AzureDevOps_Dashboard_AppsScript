@@ -64,6 +64,7 @@ function getDashboardData(params) {
     }
     var days = params.days || 30;
     var pipelineFilter = params.pipelineFilter ? new RegExp(params.pipelineFilter, 'i') : null;
+    var teamFilter = params.teamFilter || '';
     // Los filtros por stage ya no se utilizan
     var cacheKey = JSON.stringify(params);
     var baseKey = JSON.stringify({ projectName: CONFIG.projectName, days: days });
@@ -140,6 +141,16 @@ function getDashboardData(params) {
       }
       // Aplicar filtro por nombre de pipeline
       if (pipelineFilter && !pipelineFilter.test(pipeline.name)) {
+        analysis.progress.processed++;
+        return;
+      }
+      // Filtrar por equipo basándose en prefijo "an-" en el nombre
+      var hasTag = pipeline.name.toLowerCase().includes('an-');
+      if (teamFilter === 'analitica' && !hasTag) {
+        analysis.progress.processed++;
+        return;
+      }
+      if (teamFilter === 'novaventa' && hasTag) {
         analysis.progress.processed++;
         return;
       }
@@ -457,8 +468,9 @@ function calculateStats(values) {
 }
 
 function calculateAverage(values) {
-  if (!values || values.length === 0) return '0.00';
-  return (values.reduce(function(a, b) { return a + b; }, 0) / values.length).toFixed(2);
+  if (!values || values.length === 0) return '00:00:00';
+  var avg = values.reduce(function(a, b) { return a + b; }, 0) / values.length;
+  return formatDuration(avg);
 }
 
 function formatDuration(mins) {

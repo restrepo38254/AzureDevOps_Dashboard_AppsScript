@@ -329,7 +329,7 @@
       </div>
       <div class="col-md-6">
         <div class="card">
-          <div class="card-header">Execution Time Statistics (minutes)</div>
+          <div class="card-header">Execution Time Statistics (hh:mm:ss)</div>
           <div class="card-body">
             <div class="row text-center">
               <div class="col">
@@ -364,69 +364,6 @@
       </div>
     </div>
     
-    <!-- SECCIÓN DE DETALLES CON PESTAÑAS -->
-    <div class="row mt-4">
-      <div class="col-12">
-        <div class="card">
-          <div class="card-header">
-            <ul class="nav nav-tabs card-header-tabs">
-              <li class="nav-item">
-                <a class="nav-link active" data-bs-toggle="tab" href="#failedPipelinesTab">
-                  Failed Pipelines <span class="badge bg-danger rounded-pill ms-1" id="failedCountBadge">0</span>
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" data-bs-toggle="tab" href="#allPipelinesTab">
-                  All Pipelines <span class="badge bg-primary rounded-pill ms-1" id="allPipelinesBadge">0</span>
-                </a>
-              </li>
-            </ul>
-          </div>
-          <div class="card-body">
-            <div class="tab-content">
-              <!-- PESTAÑA 1: PIPELINES FALLIDOS -->
-              <div class="tab-pane fade show active" id="failedPipelinesTab">
-                <div class="table-responsive">
-                  <table class="table table-hover">
-                    <thead>
-                      <tr>
-                        <th>Pipeline</th>
-                        <th>Run ID</th>
-                        <th>Date</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody id="failedPipelinesTable">
-                      <!-- Datos dinámicos -->
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              
-              <!-- PESTAÑA 2: TODOS LOS PIPELINES -->
-              <div class="tab-pane fade" id="allPipelinesTab">
-                <div class="table-responsive">
-                  <table class="table table-hover" id="allPipelinesTable">
-                    <thead>
-                      <tr>
-                        <th>Pipeline</th>
-                        <th>Last Run</th>
-                        <th>Status</th>
-                        <th>Duration</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <!-- Datos dinámicos -->
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 
 
@@ -620,58 +557,11 @@
         document.getElementById('avgFailedTime').textContent = data.executionStats.failedAvg;
       }
       
-      // Actualizar contadores
-      document.getElementById('failedCountBadge').textContent = data.failedPipelines.length;
-      document.getElementById('allPipelinesBadge').textContent = data.allPipelines.length;
-      
       // Actualizar gráficos
       updateResultsChart(data.totals);
       updatePipelineStatsTable(data.pipelineStatsArray);
-      
-      // Actualizar tablas
-      updateFailedPipelinesTable(data.failedPipelines);
-      updateAllPipelinesTable(data.allPipelines);
-    }
-    /**
-     * ACTUALIZA LA TABLA DE PIPELINES FALLIDOS
-     * @param {Array} failedPipelines - Lista de pipelines fallidos
-     */
-    function updateFailedPipelinesTable(failedPipelines) {
-      const container = document.getElementById('failedPipelinesTable');
-      
-      // Caso cuando no hay pipelines fallidos
-      if (!failedPipelines || failedPipelines.length === 0) {
-        container.innerHTML = `
-          <tr>
-            <td colspan="4" class="text-center py-4 text-muted">
-              <i class="bi bi-check-circle" style="font-size: 2rem;"></i>
-              <p class="mt-2">No failed pipelines found in the selected period</p>
-            </td>
-          </tr>
-        `;
-        return;
-      }
-      
-      // Generar filas de la tabla
-      let html = '';
-      
-      failedPipelines.slice(0, 100).forEach(pipeline => {
-        const date = new Date(pipeline.date).toLocaleString();
 
-        html += `
-          <tr>
-            <td>${pipeline.name}</td>
-            <td>${pipeline.runId}</td>
-            <td>${date}</td>
-            <td><a href="${pipeline.url}" target="_blank" class="btn btn-sm btn-outline-primary">
-                <i class="bi bi-box-arrow-up-right"></i> View
-            </a></td>
-          </tr>
-        `;
-      });
-      
-      container.innerHTML = html;
-  }
+    }
     // FUNCIONES DE ACTUALIZACIÓN
 function updateResultsChart(totals) {
   const data = [totals.success, totals.failed, totals.other];
@@ -692,25 +582,7 @@ function updateResultsChart(totals) {
 
 
 
-    function updateAllPipelinesTable(pipelines) {
-      const tbody = document.querySelector('#allPipelinesTable tbody');
-      if (!pipelines || pipelines.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No pipelines found</td></tr>';
-        return;
-      }
-      let html = '';
-      pipelines.forEach(p => {
-        html += `
-          <tr>
-            <td>${p.name}</td>
-            <td>${p.lastRun ? new Date(p.lastRun).toLocaleString() : ''}</td>
-            <td>${p.lastStatus || ''}</td>
-            <td>${p.lastDuration || ''}</td>
-            <td><a href="${p.url}" target="_blank" class="btn btn-sm btn-outline-primary">View</a></td>
-          </tr>`;
-      });
-      tbody.innerHTML = html;
-    }
+
 
 
     function showAlert(message, type) {
