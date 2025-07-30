@@ -1,0 +1,8 @@
+{
+    "compilerOptions": {
+      "lib": ["esnext"],
+      "module": "commonjs",
+      "target": "es2019",
+      "types": ["google-apps-script"]
+    }
+  }
