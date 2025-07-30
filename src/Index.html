@@ -224,6 +224,7 @@
         </button>
       </div>
     </div>
+    <div id="alertContainer"></div>
     
     <!-- SECCIÓN DE FILTROS -->
     <div class="filter-section">
@@ -567,7 +568,9 @@
             
             currentData = response.data;
             updateDashboard(currentData);
-            
+            populatePipelineFilter();
+            populateStageTypeFilter();
+
             showAlert(`Data loaded successfully (${response.processingTime}s)`, 'success');
           }, 500);
         })
@@ -577,11 +580,6 @@
           console.error(error);
         })
         .getDashboardData(params);
-
-        // Llenar el dropdown de pipelines si está vacío
-        if (document.getElementById('pipelineFilter').options.length <= 1) {
-          populatePipelineFilter();
-}
     }
     function populatePipelineFilter() {
       const filterSelect = document.getElementById('pipelineFilter');
@@ -600,6 +598,26 @@
         option.textContent = pipeline.name;
         filterSelect.appendChild(option);
       });
+    }
+
+    function populateStageTypeFilter() {
+      const select = document.getElementById('stageTypeFilter');
+      const current = select.value;
+      while (select.options.length > 1) {
+        select.remove(1);
+      }
+      if (!currentData || !currentData.failedPipelines) return;
+      const types = new Set();
+      currentData.failedPipelines.forEach(p => {
+        p.stages.forEach(s => types.add(s.type));
+      });
+      types.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+        select.appendChild(opt);
+      });
+      select.value = current;
     }
     
     // EXPORTAR DATOS
@@ -768,14 +786,111 @@
       });
       
       // Configurar event listeners para los botones de error
-      document.querySelectorAll('.view-errors').forEach(btn => {
-        btn.addEventListener('click', function() {
-          const errors = JSON.parse(this.getAttribute('data-errors'));
-          showErrorModal(this.getAttribute('data-pipeline'), this.getAttribute('data-runid'), errors);
-        });
+    document.querySelectorAll('.view-errors').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const errors = JSON.parse(this.getAttribute('data-errors'));
+        showErrorModal(this.getAttribute('data-pipeline'), this.getAttribute('data-runid'), errors);
+      });
+    });
+  }
+    // FUNCIONES DE ACTUALIZACIÓN
+    function updateResultsChart(totals) {
+      const data = [totals.success, totals.failed, totals.other];
+      const labels = ['Success', 'Failed', 'Other'];
+      if (resultsChart) resultsChart.destroy();
+      resultsChart = new Chart(document.getElementById('resultsChart'), {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{ data, backgroundColor: ['#107c10', '#d83b01', '#6c757d'] }]
+        },
+        options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
       });
     }
-    // [Resto de funciones (updateResultsChart, updateStagesChart, etc.)...]
+
+    function updateStagesChart(stages) {
+      const labels = Object.keys(stages);
+      const counts = labels.map(k => stages[k].count);
+      if (stagesChart) stagesChart.destroy();
+      stagesChart = new Chart(document.getElementById('stagesChart'), {
+        type: 'bar',
+        data: { labels, datasets: [{ label: 'Failures', data: counts }] },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+      });
+    }
+
+    function updateErrorDetails(details) {
+      const container = document.getElementById('errorDetailsAccordion');
+      if (!details || details.length === 0) {
+        container.innerHTML = '<p class="text-center text-muted">No error details</p>';
+        return;
+      }
+      let html = '';
+      details.slice(0, 100).forEach((d, idx) => {
+        const errorsHtml = d.errors.join('<br>');
+        html += `
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="heading${idx}">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${idx}">
+                ${d.pipeline} - ${d.stage}
+              </button>
+            </h2>
+            <div id="collapse${idx}" class="accordion-collapse collapse" data-bs-parent="#errorDetailsAccordion">
+              <div class="accordion-body">
+                ${errorsHtml}
+                ${d.logUrl ? `<div class="mt-2"><a href="${d.logUrl}" target="_blank">Logs</a></div>` : ''}
+              </div>
+            </div>
+          </div>`;
+      });
+      container.innerHTML = html;
+    }
+
+    function updateAllPipelinesTable(pipelines) {
+      const tbody = document.querySelector('#allPipelinesTable tbody');
+      if (!pipelines || pipelines.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No pipelines found</td></tr>';
+        return;
+      }
+      let html = '';
+      pipelines.forEach(p => {
+        html += `
+          <tr>
+            <td>${p.name}</td>
+            <td>${p.id}</td>
+            <td></td>
+            <td></td>
+            <td><a href="${p.url}" target="_blank" class="btn btn-sm btn-outline-primary">View</a></td>
+          </tr>`;
+      });
+      tbody.innerHTML = html;
+    }
+
+    function showErrorModal(pipeline, runId, errors) {
+      const body = document.getElementById('errorModalBody');
+      const link = document.getElementById('errorLogsLink');
+      let html = '';
+      errors.forEach(e => {
+        html += `<div class="error-details">${e.errors.join('<br>')}</div>`;
+      });
+      body.innerHTML = html;
+      link.href = errors[0].logUrl || '#';
+      const modal = new bootstrap.Modal(document.getElementById('errorModal'));
+      modal.show();
+    }
+
+    function showAlert(message, type) {
+      const container = document.getElementById('alertContainer');
+      const wrapper = document.createElement('div');
+      wrapper.className = `alert alert-${type} alert-dismissible fade show mt-2`;
+      wrapper.role = 'alert';
+      wrapper.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+      container.appendChild(wrapper);
+      setTimeout(() => {
+        const alert = bootstrap.Alert.getOrCreateInstance(wrapper);
+        alert.close();
+      }, 5000);
+    }
     /**
  * ACTUALIZA EL CHART DE ESTADÍSTICAS POR PIPELINE
  * @param {Object} stats - Objeto con claves de pipeline y valores { successRate, failureRate }
