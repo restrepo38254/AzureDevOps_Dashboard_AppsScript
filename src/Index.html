@@ -228,11 +228,7 @@
     <!-- SECCIÓN DE FILTROS -->
     <div class="filter-section">
       <div class="row g-3">
-        <div class="col-md-4">
-          <label class="form-label">Project</label>
-          <select id="projectSelect" class="form-select"></select>
-        </div>
-        <div class="col-md-4">
+        <div class="col-md-6">
           <label class="form-label">Time Period</label>
           <select id="days" class="form-select">
             <option value="7">Last 7 days</option>
@@ -241,7 +237,7 @@
             <option value="90">Last 90 days</option>
           </select>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-6">
           <label class="form-label">Team</label>
           <select id="teamFilter" class="form-select">
             <option value="">All Teams</option>
@@ -311,8 +307,23 @@
             <span>Pipeline Results Overview</span>
             <span class="badge bg-primary rounded-pill" id="successRateBadge">0%</span>
           </div>
-          <div class="chart-container">
-            <canvas id="resultsChart"></canvas>
+          <div class="card-body">
+            <div class="row">
+              <div class="col-md-8">
+                <div class="chart-container">
+                  <canvas id="resultsChart"></canvas>
+                </div>
+              </div>
+              <div class="col-md-4 align-self-center">
+                <table class="table table-sm mb-0">
+                  <tbody>
+                    <tr><td><span class="badge bg-success">Success</span></td><td id="legendSuccess">0</td></tr>
+                    <tr><td><span class="badge bg-danger">Failed</span></td><td id="legendFailed">0</td></tr>
+                    <tr><td><span class="badge bg-secondary">Other</span></td><td id="legendOther">0</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -322,16 +333,12 @@
           <div class="card-body">
             <div class="row text-center">
               <div class="col">
-                <div class="metric-title">Average</div>
-                <div class="metric-value text-info" id="avgTime">0</div>
+                <div class="metric-title">Success Avg</div>
+                <div class="metric-value text-info" id="avgSuccessTime">0</div>
               </div>
               <div class="col">
-                <div class="metric-title">Median</div>
-                <div class="metric-value text-info" id="medianTime">0</div>
-              </div>
-              <div class="col">
-                <div class="metric-title">95th %ile</div>
-                <div class="metric-value text-info" id="p95Time">0</div>
+                <div class="metric-title">Failed Avg</div>
+                <div class="metric-value text-info" id="avgFailedTime">0</div>
               </div>
             </div>
           </div>
@@ -347,7 +354,7 @@
                   <th>Pipeline</th>
                   <th>Success %</th>
                   <th>Failure %</th>
-                  <th>Avg Duration (min)</th>
+                  <th>Avg Duration</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -448,8 +455,7 @@
         populatePipelineFilter();
       });
       
-      // Obtener proyectos y luego cargar datos
-      loadProjects().then(loadData);
+      loadData();
     });
     
     // MOSTRAR LOADING
@@ -486,29 +492,9 @@
       document.getElementById('loadingDetails').textContent = details;
     }
 
-    // Cargar lista de proyectos y llenar el selector
-    function loadProjects() {
-      return new Promise(function(resolve) {
-        google.script.run.withSuccessHandler(function(data) {
-          const select = document.getElementById('projectSelect');
-          select.innerHTML = '';
-          if (data && data.value) {
-            data.value.forEach(function(p) {
-              const opt = document.createElement('option');
-              opt.value = p.name;
-              opt.textContent = p.name;
-              select.appendChild(opt);
-            });
-          }
-          resolve();
-        }).listProjects();
-      });
-    }
-    
     // CARGAR DATOS
     function loadData() {
       const days = document.getElementById('days').value;
-      const projectName = document.getElementById('projectSelect').value;
       const pipelineFilter = document.getElementById('pipelineFilter').value;
       const teamFilter = document.getElementById('teamFilter').value;
       
@@ -518,7 +504,6 @@
       // Parámetros
       const params = {
         days: parseInt(days),
-        projectName: projectName,
         pipelineFilter: pipelineFilter,
         teamFilter: teamFilter
       };
@@ -562,8 +547,9 @@
       if (!currentData || !currentData.allPipelines) return;
 
       currentData.allPipelines.forEach(pipeline => {
-        if (team === 'analitica' && !pipeline.name.startsWith('an-')) return;
-        if (team === 'novaventa' && pipeline.name.startsWith('an-')) return;
+        const hasTag = pipeline.name.toLowerCase().includes('an-');
+        if (team === 'analitica' && !hasTag) return;
+        if (team === 'novaventa' && hasTag) return;
         const option = document.createElement('option');
         option.value = pipeline.name;
         option.textContent = pipeline.name;
@@ -630,9 +616,8 @@
       
       // Actualizar estadísticas de tiempo
       if (data.executionStats) {
-        document.getElementById('avgTime').textContent = data.executionStats.average;
-        document.getElementById('medianTime').textContent = data.executionStats.median;
-        document.getElementById('p95Time').textContent = data.executionStats.percentile95;
+        document.getElementById('avgSuccessTime').textContent = data.executionStats.successAvg;
+        document.getElementById('avgFailedTime').textContent = data.executionStats.failedAvg;
       }
       
       // Actualizar contadores
@@ -641,7 +626,7 @@
       
       // Actualizar gráficos
       updateResultsChart(data.totals);
-      updatePipelineStatsTable(data.pipelineStats);
+      updatePipelineStatsTable(data.pipelineStatsArray);
       
       // Actualizar tablas
       updateFailedPipelinesTable(data.failedPipelines);
@@ -688,19 +673,22 @@
       container.innerHTML = html;
   }
     // FUNCIONES DE ACTUALIZACIÓN
-    function updateResultsChart(totals) {
-      const data = [totals.success, totals.failed, totals.other];
-      const labels = ['Success', 'Failed', 'Other'];
-      if (resultsChart) resultsChart.destroy();
-      resultsChart = new Chart(document.getElementById('resultsChart'), {
-        type: 'doughnut',
-        data: {
-          labels,
-          datasets: [{ data, backgroundColor: ['#107c10', '#d83b01', '#6c757d'] }]
-        },
-        options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
-      });
-    }
+function updateResultsChart(totals) {
+  const data = [totals.success, totals.failed, totals.other];
+  const labels = ['Success', 'Failed', 'Other'];
+  if (resultsChart) resultsChart.destroy();
+  resultsChart = new Chart(document.getElementById('resultsChart'), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: ['#107c10', '#d83b01', '#6c757d'] }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+  document.getElementById('legendSuccess').textContent = totals.success;
+  document.getElementById('legendFailed').textContent = totals.failed;
+  document.getElementById('legendOther').textContent = totals.other;
+}
 
 
 
@@ -743,15 +731,13 @@
  */
 function updatePipelineStatsTable(stats) {
   const tbody = document.querySelector('#pipelineStatsTable tbody');
-  const labels = Object.keys(stats);
-  if (labels.length === 0) {
+  if (!stats || stats.length === 0) {
     tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data</td></tr>';
     return;
   }
   let html = '';
-  labels.forEach(name => {
-    const s = stats[name];
-    html += `<tr><td>${name}</td><td>${s.successRate}%</td><td>${s.failureRate}%</td><td>${s.avgDuration}</td></tr>`;
+  stats.forEach(row => {
+    html += `<tr><td>${row.name}</td><td>${row.successRate}%</td><td>${row.failureRate}%</td><td>${row.avgDuration}</td></tr>`;
   });
   tbody.innerHTML = html;
 }

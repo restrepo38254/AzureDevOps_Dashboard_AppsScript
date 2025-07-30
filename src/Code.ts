@@ -126,6 +126,8 @@ function getDashboardData(params) {
     var runResponses = [];
     var pipelinesOrdered = [];
     var pipelineObjects = [];
+    var successDurations = [];
+    var failedDurations = [];
     pipelines.value.forEach(function(pipeline, index) {
       // Excluir pipelines deshabilitados o de repositorios inactivos
       if (pipeline.queueStatus && pipeline.queueStatus.toLowerCase() !== 'enabled') {
@@ -162,7 +164,7 @@ function getDashboardData(params) {
         pipelinesOrdered.push(pipeline);
       } else {
         pipelinesToProcess.push(pipeline);
-        runRequests.push(`pipelines/${pipeline.id}/runs?$top=${CONFIG.maxRuns}&api-version=7.1-preview.1`);
+        runRequests.push(`pipelines/${pipeline.id}/runs?$top=${CONFIG.maxRuns}&minTime=${cutoffDate.toISOString()}&api-version=7.1-preview.1`);
       }
     });
     var fetchedRuns = callAzureApiBatch(runRequests);
@@ -208,6 +210,8 @@ function getDashboardData(params) {
             runId: run.id,
             duration: duration
           });
+          if (result === 'succeeded') successDurations.push(duration);
+          if (result === 'failed') failedDurations.push(duration);
           analysis.pipelineStats[pipeline.name].durations.push(duration);
         }
 
@@ -241,13 +245,22 @@ function getDashboardData(params) {
       stats.failureRate = total ? ((stats.failed / total) * 100).toFixed(2) : '0.00';
       if (stats.durations && stats.durations.length) {
         var sum = stats.durations.reduce(function(a, b) { return a + b; }, 0);
-        stats.avgDuration = (sum / stats.durations.length).toFixed(2);
+        stats.avgDuration = formatDuration(sum / stats.durations.length);
       } else {
-        stats.avgDuration = '0.00';
+        stats.avgDuration = '00:00:00';
       }
     }
+    analysis.pipelineStatsArray = Object.keys(analysis.pipelineStats).map(function(n) {
+      var s = analysis.pipelineStats[n];
+      return { name: n, successRate: s.successRate, failureRate: s.failureRate, avgDuration: s.avgDuration };
+    }).sort(function(a, b) {
+      return parseFloat(b.successRate) - parseFloat(a.successRate);
+    });
     // 16. CALCULAR ESTADÍSTICAS DE TIEMPO
-    analysis.executionStats = calculateStats(analysis.executionTimes.map(x => x.duration));
+    analysis.executionStats = {
+      successAvg: calculateAverage(successDurations),
+      failedAvg: calculateAverage(failedDurations)
+    };
     
     // 17. ACTUALIZAR CACHÉ
     CACHE.statistics = analysis;
@@ -294,9 +307,11 @@ function exportToCSV(params) {
   // 2. PREPARAR SOLICITUDES DE EJECUCIONES
   var runRequests = [];
   var pipelinesToProcess = [];
+  var cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - (params.days || 30));
   data.data.allPipelines.forEach(function(pipeline) {
     pipelinesToProcess.push(pipeline);
-    runRequests.push(`pipelines/${pipeline.id}/runs?$top=${CONFIG.maxRuns}&api-version=7.1-preview.1`);
+    runRequests.push(`pipelines/${pipeline.id}/runs?$top=${CONFIG.maxRuns}&minTime=${cutoffDate.toISOString()}&api-version=7.1-preview.1`);
   });
 
   var runResponses = callAzureApiBatch(runRequests);
@@ -439,6 +454,19 @@ function calculateStats(values) {
     max: Math.max(...values).toFixed(2),
     percentile95: values[Math.floor(values.length * 0.95)].toFixed(2)
   };
+}
+
+function calculateAverage(values) {
+  if (!values || values.length === 0) return '0.00';
+  return (values.reduce(function(a, b) { return a + b; }, 0) / values.length).toFixed(2);
+}
+
+function formatDuration(mins) {
+  var totalSeconds = Math.round(mins * 60);
+  var h = Math.floor(totalSeconds / 3600);
+  var m = Math.floor((totalSeconds % 3600) / 60);
+  var s = totalSeconds % 60;
+  return [h, m, s].map(function(v) { return String(v).padStart(2, '0'); }).join(':');
 }
 
 /**
